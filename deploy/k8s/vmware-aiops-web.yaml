@@ -1,0 +1,69 @@
+# kubectl apply -f deploy/k8s/vmware-aiops-web.yaml
+# Prerequisite secret (holds the Claude gateway token — the app needs a model endpoint):
+#   oc -n vmware-aiops-web create secret generic claude-gateway \
+#     --from-literal=ANTHROPIC_AUTH_TOKEN='<token>'
+# Image is public on ghcr.io/bplein/vmware-aiops-web — no pull secret needed.
+apiVersion: v1
+kind: Namespace
+metadata: {name: vmware-aiops-web}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: web-config, namespace: vmware-aiops-web}
+data:
+  ANTHROPIC_BASE_URL: "https://gpulab.purestorage.com"
+  ANTHROPIC_MODEL: "Kimi-K3-lab-claude-compatible[1m]"
+  WEB_MODEL: "Kimi-K3-lab-claude-compatible[1m]"
+---
+apiVersion: v1
+kind: Service
+metadata: {name: vmware-aiops-web, namespace: vmware-aiops-web}
+spec:
+  selector: {app: vmware-aiops-web}
+  ports: [{name: http, port: 80, targetPort: 8080}]
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata: {name: vmware-aiops-web, namespace: vmware-aiops-web}
+spec:
+  host: vmware-aiops-web-vmware-aiops-web.apps.ocp1.plein.cna.lab
+  to: {kind: Service, name: vmware-aiops-web}
+  port: {targetPort: http}
+  tls: {termination: edge, insecureEdgeTerminationPolicy: Redirect}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: vmware-aiops-web, namespace: vmware-aiops-web}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}   # sessions are in-memory; no concurrent old/new pods
+  selector: {matchLabels: {app: vmware-aiops-web}}
+  template:
+    metadata: {labels: {app: vmware-aiops-web}}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: web
+          image: ghcr.io/bplein/vmware-aiops-web:latest
+          ports: [{containerPort: 8080}]
+          envFrom:
+            - {configMapRef: {name: web-config}}
+            - {secretRef: {name: claude-gateway}}
+          readinessProbe: {httpGet: {path: /healthz, port: 8080}}
+          livenessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 30}
+          # NOTE: claude CLI + node write to HOME and /tmp; RO rootfs deferred.
+          securityContext:
+            runAsNonRoot: false        # claude CLI under arbitrary UID needs work first
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 100m, memory: 512Mi}
+            limits: {memory: 1Gi}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: tmp, mountPath: /tmp}
+      volumes:
+        - {name: data, emptyDir: {}}
+        - {name: tmp, emptyDir: {}}
