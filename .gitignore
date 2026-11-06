@@ -1,0 +1,21 @@
+# common
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# python (likely backend)
+__pycache__/
+.venv/
+*.pyc
+.uv-cache/
+
+# node (likely frontend)
+node_modules/
+dist/
+build/
+
+# secrets of any stripe
+*.key
+*.pem
+secrets/
