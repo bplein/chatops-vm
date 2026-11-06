@@ -17,7 +17,7 @@ PLATFORM_PAGE = f"""<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ChatOps VM — Choose your AI client</title>
 <style>{_BASE_CSS}
-#w{{max-width:60ch;margin:0 auto;padding:32px 16px 48px}}
+#w{{max-width:64ch;margin:0 auto;padding:0 16px}}
 header{{display:flex;align-items:baseline;gap:10px;padding:6px 2px 14px;
   border-bottom:1px solid var(--line);margin-bottom:22px}}
 header b{{font-size:1.0625rem;letter-spacing:-0.015em}}
@@ -34,7 +34,8 @@ h1{{font-size:1.25rem;margin-bottom:4px}}
 .card button{{padding:10px 14px;white-space:nowrap}}
 .foot{{color:var(--muted);font-size:.8125rem;margin:22px 2px 0}}</style></head>
 <body>
-<button class="theme" onclick="toggleTheme()">Theme</button>
+<div id="frame">
+<div class="topbar"><button class="theme" onclick="toggleTheme()">Theme</button></div>
 <div id="w">
   <header>
     <b>ChatOps VM</b>
@@ -75,6 +76,7 @@ h1{{font-size:1.25rem;margin-bottom:4px}}
 </div>
 <script>{_THEME_JS}</script>
 <div class="vfoot">vmware-aiops __AIOPS_VERSION__</div>
+</div>
 </body></html>"""
 
 AUTH_PAGE = f"""<!doctype html>
@@ -82,7 +84,7 @@ AUTH_PAGE = f"""<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ChatOps VM — Finish setup</title>
 <style>{_BASE_CSS}
-#w{{max-width:60ch;margin:0 auto;padding:32px 16px 48px}}
+#w{{max-width:64ch;margin:0 auto;padding:0 16px}}
 h1{{font-size:1.25rem;margin-bottom:14px}}
 #status{{display:flex;align-items:center;gap:8px;color:var(--muted);
   font-size:.8125rem;margin:0 0 18px}}
@@ -101,7 +103,8 @@ section pre{{background:var(--field);border:1px solid var(--line);border-radius:
 section pre code{{border:0;background:none;padding:0}}
 .cancel{{display:inline-block;margin-top:22px;font-size:.8125rem}}</style></head>
 <body>
-<button class="theme" onclick="toggleTheme()">Theme</button>
+<div id="frame">
+<div class="topbar"><button class="theme" onclick="toggleTheme()">Theme</button></div>
 <div id="w">
   <h1>Finish setup: __PLATFORM__</h1>
   __ERROR__
@@ -132,4 +135,5 @@ section pre code{{border:0;background:none;padding:0}}
 }})();
 </script>
 <div class="vfoot">vmware-aiops __AIOPS_VERSION__</div>
+</div>
 </body></html>"""

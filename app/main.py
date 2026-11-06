@@ -221,7 +221,7 @@ async def root(request: Request):
 
 
 @APP.post("/login")
-async def login(host: str = Form(...), username: str = Form(...),
+async def login(request: Request, host: str = Form(...), username: str = Form(...),
                 password: str = Form(...), verify_ssl: bool = Form(False)):
     host = host.strip()
     username = username.strip()
