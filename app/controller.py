@@ -26,7 +26,8 @@ import time
 log = logging.getLogger(__name__)
 
 DEFAULT_NAMESPACE = "chatops-vm"
-DEFAULT_AGENT_IMAGE = "ghcr.io/bplein/chatops-vm:latest"
+# Pinned tag — keep in sync with VERSION; never :latest.
+DEFAULT_AGENT_IMAGE = "ghcr.io/bplein/chatops-vm:0.3.0"
 DEFAULT_MAX_SESSION_PODS = 10
 
 # Phases that occupy a slot against MAX_SESSION_PODS. Succeeded/Failed pods
