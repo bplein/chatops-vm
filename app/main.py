@@ -73,9 +73,9 @@ PLATFORMS = {"claude": "Claude Code", "gemini": "Gemini CLI", "codex": "Codex CL
 # Codex device auth uses the user's own ChatGPT account.
 AUTH_INSTRUCTIONS = {
     "claude": (
-        "<p>On any machine where Claude Code is signed in (typically your laptop), run "
-        "<code>claude setup-token</code> and paste the token below. It authorizes this session "
-        "as <b>you</b>, against your enterprise account — no org API keys needed.</p>"
+        "<p>Open a terminal on any machine where Claude Code is signed in with your account "
+        "(your laptop is fine) and run <code>claude setup-token</code>. Paste the token it prints "
+        "below — it authorizes this session as <b>you</b>. No org API keys needed.</p>"
         "<form method='post' action='/session/auth/key'>"
         "<label>Claude token (from <code>claude setup-token</code>)</label>"
         "<input type='password' name='api_key' autocomplete='off' required>"
