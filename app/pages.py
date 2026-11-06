@@ -84,9 +84,9 @@ h1{{font-size:1.25rem}}
   <h1>vSphere Ops</h1>
   <p class="sub">Chat with your vCenter. Credentials are verified once against the vCenter and held in server memory for this session only — never written to disk, never shared between users.</p>
   <label for="host">vCenter host</label>
-  <input id="host" name="host" type="text" placeholder="vcenter01.example.com" autocomplete="off" required>
+  <input id="host" name="host" type="text" placeholder="vcenter01.example.com" autocomplete="off" value="__HOSTVALUE__" required>
   <label for="username">Username</label>
-  <input id="username" name="username" type="text" placeholder="you@vsphere.local" autocomplete="username" required>
+  <input id="username" name="username" type="text" placeholder="you@vsphere.local" autocomplete="username" value="__USERVALUE__" required>
   <label for="password">Password</label>
   <input id="password" name="password" type="password" autocomplete="current-password" required>
   <div class="row">

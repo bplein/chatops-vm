@@ -190,11 +190,21 @@ async def healthz():
     return {"ok": True, "sessions": len(SESSIONS)}
 
 
+_PREFILL_MAX_AGE = 90 * 24 * 3600  # convenience cookies only; never the password
+
+
+def _login_page(request: Request, error: str = "") -> HTMLResponse:
+    page = LOGIN_PAGE.replace("__ERROR__", error)
+    page = page.replace("__HOSTVALUE__", html.escape(request.cookies.get("aivc_host", ""), quote=True))
+    page = page.replace("__USERVALUE__", html.escape(request.cookies.get("aivc_user", ""), quote=True))
+    return HTMLResponse(page)
+
+
 @APP.get("/", response_class=HTMLResponse)
 async def root(request: Request):
     sid = _scan_sid(request)
     if not sid or not _get_session(sid):
-        return HTMLResponse(LOGIN_PAGE.replace("__ERROR__", ""))
+        return _login_page(request)
     return RedirectResponse("/platform")
 
 
@@ -205,8 +215,7 @@ async def login(host: str = Form(...), username: str = Form(...),
     username = username.strip()
     err = await asyncio.to_thread(_verify_vcenter, host, username, password, verify_ssl)
     if err:
-        return HTMLResponse(LOGIN_PAGE.replace("__ERROR__", f'<p class="err">{html.escape(err)}</p>'),
-                            status_code=401)
+        return _login_page(request, error=f'<p class="err">{html.escape(err)}</p>')
     sid = uuid.uuid4().hex
     SESSIONS[sid] = {"id": sid, "host": host, "username": username,
                      "password": password, "verify_ssl": verify_ssl,
@@ -220,6 +229,12 @@ async def login(host: str = Form(...), username: str = Form(...),
             asyncio.ensure_future(_dispose(old))
     resp = RedirectResponse("/platform", status_code=303)
     resp.set_cookie("aisession", _SER.dumps(sid), httponly=True, secure=True, samesite="lax")
+    # Convenience prefill for next login. Username/host are identifiers, not secrets —
+    # the password is NEVER cookied (that's the product promise).
+    resp.set_cookie("aivc_host", host, httponly=True, secure=True, samesite="lax",
+                    max_age=_PREFILL_MAX_AGE)
+    resp.set_cookie("aivc_user", username, httponly=True, secure=True, samesite="lax",
+                    max_age=_PREFILL_MAX_AGE)
     return resp
 
 
