@@ -1,12 +1,12 @@
-# vmware-aiops-web: FastAPI chat UI wrapping claude-agent-sdk + the vmware-aiops MCP server.
+# vmware-aiops-web: FastAPI frontend + session-pod image carrying the three CLIs
 FROM python:3.12-slim
 RUN apt-get update \
  && apt-get install -y --no-install-recommends nodejs npm \
  && rm -rf /var/lib/apt/lists/*
-RUN npm install -g @anthropic-ai/claude-code
-RUN pip install --no-cache-dir fastapi uvicorn itsdangerous pyVmomi claude-agent-sdk "vmware-aiops==2.4.2"
+RUN npm install -g @anthropic-ai/claude-code @google/gemini-cli @openai/codex
+RUN pip install --no-cache-dir fastapi uvicorn itsdangerous pyVmomi kubernetes "vmware-aiops==2.4.2"
 WORKDIR /app
-COPY app/main.py ./app/main.py
+COPY app/ ./app/
 ENV DATA_DIR=/data \
     PORT=8080 \
     HOME=/data/home

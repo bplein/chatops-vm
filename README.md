@@ -1,41 +1,47 @@
 # vmware-aiops-web
 
-A web chat UI for the upstream [VMware-AIops](https://github.com/vmware-skills/VMware-AIops) MCP server — chat-ops administer vSphere from a browser. Built on the [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk).
+A multi-user web chat-ops UI for vSphere. Pick an AI client, sign in with your vCenter credentials, and drive the environment from the browser.
 
-## How it works
+## Clients supported
 
-Each browser session signs in with vCenter credentials:
+- **Claude Code** — bring your Anthropic API key (billed by Anthropic to the key's org). Native claude.ai enterprise/subscription login can't be embedded by third-party Agent-SDK apps; API keys are the documented path for this shape.
+- **Gemini CLI** — bring a Gemini API key from Google AI Studio (has a free tier).
+- **Codex CLI** — sign in with your ChatGPT account via device code, in Codex's native headless flow.
+- **OpenCode** is deliberately deferred.
 
-1. The app verifies the credentials against the vCenter once (`SmartConnect`), then stores the password in **server memory only**, keyed by an unguessable session id.
-2. The session lazily spawns a persistent `ClaudeSDKClient` with one MCP stdio server (`vmware-aiops mcp`). That server's environment carries the per-session vCenter password; the Claude chat model calls only these MCP tools (no shell, no filesystem).
-3. Passwords are never written to disk, never logged, never shared between sessions. Sign-out, session expiry (4h idle), or a container restart drops them.
+## Architecture
 
-**Hard rule:** all model API use happens under HTTPS session scope; concurrent users get fully separate Claude sessions.
+Per connected user:
+
+- one **ephemeral pod** in the cluster: sleeps idle, has your vCenter creds via a dedicated in-namespace Secret, gets its own writable `/data`, no Kubernetes API token, non-root, drop-ALL caps, seccomp RuntimeDefault;
+- your model choice/credential applies **only to your session's CLI service account**;
+- logout / 4 idle hours / TTL expiry kills the pod and deletes the Secret.
+
+The web tier is replicas × sticky-route; everything session-stateful lives in the cluster, so a crashed pod doesn't take your login page away. A startup and periodic sweep in the web tier removes cluster objects left behind by a dead web pod.
+
+The lab-deployed Claude sessions honor the vSphere-gated upstream skill: `vmware-aiops mcp` runs inside your session pod; the chat model can only call the MCP tools (no bash, no host filesystem).
+
+## Deploy (lab)
+
+```
+oc apply -f deploy/k8s/vmware-aiops-web-rbac.yaml
+oc apply -f deploy/k8s/vmware-aiops-web.yaml
+```
+
+No image pull secret needed (GHCR package is public). No shared token secret needed: users bring the model credential.
+
+Route host: `vmware-aiops-web-vmware-aiops-web.apps.ocp1.plein.cna.lab` (edge TLS + redirect; cookie-based session affinity pins each browser to its web pod).
 
 ## Run locally
 
 ```
 pip install -r requirements.txt
-DATA_DIR=/tmp/aiops-web python app/main.py    # http on :8080 (the session cookie is Secure; use behind TLS — see the k8s Route)
+DATA_DIR=/tmp/aiops-web python app/main.py     # binds http :8080
 ```
 
-## Deploy to OpenShift (lab)
-
-```
-oc apply -f deploy/k8s/vmware-aiops-web.yaml
-oc -n vmware-aiops-web create secret generic claude-gateway \
-  --from-literal=ANTHROPIC_AUTH_TOKEN='<gpulab gateway token>'
-```
-
-Route host: `vmware-aiops-web-vmware-aiops-web.apps.ocp1.plein.cna.lab` (edge TLS, redirect).
-
-The `web-config` ConfigMap pins the model backend to the lab gateway (`gpulab.purestorage.com`) and the default model `Kimi-K3-lab-claude-compatible[1m]`; override either via the ConfigMap.
-
-## Container
-
-Built by GitHub Actions to `ghcr.io/bplein/vmware-aiops-web` (public; pulls need no auth). `python:3.12-slim` + node + `@anthropic-ai/claude-code` CLI + `vmware-aiops==2.4.2` MCP server. Tags: `latest`, `sha-<sha>`; a `v*` tag adds the version tag.
+You need a kubeconfig pointing at the cluster where session pods should live (controller falls back to `~/.kube/config` outside a pod).
 
 ## Related repos
 
-- Upstream: [vmware-skills/VMware-AIops](https://github.com/vmware-skills/VMware-AIops) (MCP server + skill)
-- Sibling (resource-pool dashboard): [bplein/vmware-collector](https://github.com/bplein/vmware-collector)
+- Upstream skill/MCP: [vmware-skills/VMware-AIops](https://github.com/vmware-skills/VMware-AIops) (MIT, community project — not a VMware product)
+- Sibling dashboard: [bplein/vmware-collector](https://github.com/bplein/vmware-collector)

@@ -164,21 +164,11 @@ async function ask(){{
   try{{
     const r=await fetch('/api/chat',{{method:'POST',
       headers:{{'content-type':'application/json'}},body:JSON.stringify({{message:text}})}});
+    const d=await r.json();
     if(r.status===401){{p.textContent='Session expired — sign in again.';return;}}
-    const rd=r.body.getReader(),dec=new TextDecoder();let buf='',acc='',first=true;
-    while(true){{
-      const {{done,value}}=await rd.read();if(done)break;
-      buf+=dec.decode(value,{{stream:true}});
-      let i;while((i=buf.indexOf('\\n\\n'))>=0){{
-        const ev=buf.slice(0,i);buf=buf.slice(i+2);
-        if(!ev.startsWith('data:'))continue;
-        const d=JSON.parse(ev.slice(5));
-        if(d.text!==undefined){{if(first){{p.textContent='';first=false;}}acc+=d.text;p.textContent=acc;follow();}}
-        if(d.note)add('note','').querySelector('p').textContent=d.note;
-        if(d.error){{box.classList.add('error');
-          if(first)p.textContent=d.error;else p.textContent=acc+'\\n\\nSomething went wrong: '+d.error;}}
-      }}
-    }}
+    if(!r.ok||d.error){{box.classList.add('error');p.textContent=d.error||('HTTP '+r.status);return;}}
+    p.textContent=d.text||'(no output)';
+    follow();
   }}catch(e){{box.classList.add('error');p.textContent='Connection lost mid-answer. Try again.';}}
   finally{{sendBtn.disabled=false;q.focus();}}
 }}

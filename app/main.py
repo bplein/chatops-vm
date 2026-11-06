@@ -1,16 +1,17 @@
-"""vmware-aiops-web: per-session Claude chat over the vmware-aiops MCP server.
+"""vmware-aiops-web: multi-user, per-session chat-ops for vSphere.
 
-Each browser session:
-  - verifies vCenter creds (pyVmomi SmartConnect) at login,
-  - holds the password only in server RAM (keyed by an unguessable session id),
-  - spawns a ClaudeSDKClient whose MCP stdio server (`vmware-aiops mcp`) gets
-    that session's config path + password via env (per-server env passing),
-  - exposes ONLY the MCP tools to Claude (no Bash/file tools in the container).
+Flow: vCenter sign-in -> choose AI client (Claude Code / Gemini CLI / Codex CLI)
+-> authenticate that client (API key paste, or Codex device-code)
+-> chat; the client runs `vmware-aiops` MCP inside an ephemeral per-session pod.
 
-Nothing is persisted: sessions live in memory; a container restart logs everyone out.
+Boundaries: vCenter password + AI credential live only in server RAM and the
+session's k8s Secret (deleted on logout/expiry). Session pods get no k8s API
+token. Web tier replicas are safe: session state lives in the cluster, and the
+Route cookie pins a browser to the pod that served its login.
 """
 
 import asyncio
+import html
 import json
 import logging
 import os
@@ -21,33 +22,80 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from itsdangerous import BadSignature, URLSafeSerializer
 
 from pages import CHAT_PAGE, LOGIN_PAGE
+from pages_platform import AUTH_PAGE, PLATFORM_PAGE
+
+# Developer-launched wrappers (e.g. local-claude.sh) export lab/model env that must
+# NOT reach web users' Claude sessions. Remove anything a user's subprocess could
+# otherwise inherit; the deployment env (manifest/secret) is the only source left.
+_SCRUB = [
+    "ANTHROPIC_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL",
+    "CLAUDE_CODE_SUBAGENT_MODEL",
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS",
+    "CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN",
+]
+for _k in _SCRUB:
+    os.environ.pop(_k, None)
 
 log = logging.getLogger("web")
 
 APP = FastAPI(title="vmware-aiops-web")
 SESSION_TTL_S = 4 * 3600
-MAX_SESSIONS = 8
+MAX_SESSIONS = int(os.environ.get("MAX_SESSIONS", "8"))
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 SESSIONS_DIR = DATA_DIR / "sessions"
 SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
-# Cookie signing key: per-process random (restart = everyone logged out, by design).
-_SER = URLSafeSerializer(uuid.uuid4().hex, salt="aiops-web")
-MODEL = os.environ.get("WEB_MODEL", "Kimi-K3-lab-claude-compatible[1m]")
+_SER = URLSafeSerializer(uuid.uuid4().hex, salt="aiops-web")  # restart = logout all
 
-SYSTEM = (
-    "You are vSphere Ops, a chat assistant embedded in a web UI. You administer VMware "
-    "vSphere through the MCP tools of the connected `vsphere` server (the vmware-aiops "
-    "package). Stay inside those tools; never claim you ran something you did not. Be "
-    "concise. Prefer tables for inventory. For any write operation, the tools themselves "
-    "enforce confirm= gates: show the blast-radius preview plainly and proceed only when "
-    "the user explicitly confirms. You have no filesystem, shell, or other tools."
-)
+PLATFORMS = {"claude": "Claude Code", "gemini": "Gemini CLI", "codex": "Codex CLI"}
+
+# Per-platform auth instructions, rendered into AUTH_PAGE. Written frankly:
+# Claude API keys are billed by Anthropic; Gemini keys from AI Studio have a free tier;
+# Codex device auth uses the user's own ChatGPT account.
+AUTH_INSTRUCTIONS = {
+    "claude": (
+        "<p>Claude Code needs an Anthropic <b>API key</b> (Console &rarr; API keys). "
+        "Spend bills to the key's organization.</p>"
+        "<p><i>Native claude.ai/enterprise sign-in can't be embedded in this app "
+        "(SDK terms); API-key auth is the supported path.</i></p>"
+        "<form method='post' action='/session/auth/key'>"
+        "<label>Anthropic API key</label>"
+        "<input type='password' name='api_key' placeholder='sk-ant-...' autocomplete='off' required>"
+        "<button type='submit'>Save and continue</button></form>"
+    ),
+    "gemini": (
+        "<p>Gemini CLI needs a <b>Gemini API key</b> (Google AI Studio &rarr; Get API key); "
+        "there is a free tier.</p>"
+        "<form method='post' action='/session/auth/key'>"
+        "<label>Gemini API key</label>"
+        "<input type='password' name='api_key' autocomplete='off' required>"
+        "<button type='submit'>Save and continue</button></form>"
+    ),
+    "codex": (
+        "<p>Codex signs in with your ChatGPT account using a <b>device code</b> "
+        "(nothing is pasted into this page).</p>"
+        "<form method='post' action='/session/auth/device'>"
+        "<button type='submit'>Start device sign-in</button></form>"
+        "<p><i>Requires device-code login enabled in your ChatGPT security settings.</i></p>"
+        "<div id='devstat' class='muted' style='margin-top:12px'></div>"
+        "<script>(async()=>{const d=document.getElementById('devstat');"
+        "while(true){try{const r=await fetch('/session/auth/device/poll');"
+        "if(!r.ok)break;const j=await r.json();"
+        "if(j.url)d.innerHTML='<p>Open <a href=\"'+j.url+'\" target=_blank rel=\"noreferrer\">this link</a>'+(j.code?' — enter code <b style=\"font-size:1.4em;letter-spacing:.12em\">'+j.code+'</b>':' — the sign-in code will appear here shortly')+'</p>';"
+        "if(j.ready){d.innerHTML='<p>Signed in. Redirecting…</p>';window.location.replace('/chat');break;}"
+        "}catch(e){break}"
+        "await new Promise(r=>setTimeout(r,2500));}})();</script>"
+    ),
+}
 
 SESSIONS: dict[str, dict] = {}
 _LOCK = asyncio.Lock()
@@ -71,7 +119,6 @@ def _get_session(sid: str) -> dict | None:
 
 
 def _verify_vcenter(host: str, username: str, password: str, verify_ssl: bool) -> str | None:
-    """Return None on success, an error string otherwise."""
     from pyVim.connect import Disconnect, SmartConnect
 
     try:
@@ -85,72 +132,57 @@ def _verify_vcenter(host: str, username: str, password: str, verify_ssl: bool) -
         si = SmartConnect(host=host, user=username, pwd=password, sslContext=ctx)
         Disconnect(si)
         return None
-    except Exception as e:  # any failure means "can't log in"
+    except Exception as e:
         msg = str(e)
         if re.search(r"invalid login|incorrect user name or password", msg, re.I):
             return "Login failed: invalid username or password."
         return f"Could not connect to vCenter: {msg[:200]}"
 
 
-def _write_session_config(s: dict) -> Path:
-    path = SESSIONS_DIR / s["id"]
-    path.mkdir(exist_ok=True)
-    cfg = path / "config.yaml"
-    cfg.write_text(
-        "targets:\n"
-        "  - name: web\n"
-        f"    host: {s['host']}\n"
-        "    type: vcenter\n"
-        f"    username: {s['username']}\n"
-        "    port: 443\n"
-        f"    verify_ssl: {str(s['verify_ssl']).lower()}\n"
-        "scanner: {enabled: false}\n"
-        "notify: {webhook_url: ''}\n"
-    )
-    cfg.chmod(0o600)
-    return cfg
-
-
-async def _dispose_client(s: dict) -> None:
-    client = s.get("client")
-    s["client"] = None
-    if client:
-        try:
-            await client.disconnect()
-        except Exception:
-            log.exception("client disconnect failed")
-
-
-async def _ensure_client(s: dict) -> None:
-    if s.get("client"):
+async def _dispose(s: dict) -> None:
+    s_id = s.get("id")
+    if not s_id:
         return
-    from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
+    if s.get("pod_started"):
+        def _cleanup():
+            import controller
+            controller.delete_session(s_id)
+        await asyncio.to_thread(_cleanup)
 
-    cfg = _write_session_config(s)
-    options = ClaudeAgentOptions(
-        system_prompt={"type": "custom", "prompt": SYSTEM, "snapshot": True},
-        model=MODEL,
-        permission_mode="bypassPermissions",
-        allowed_tools=["mcp__vsphere"],
-        cwd=str(SESSIONS_DIR / s["id"]),
-        mcp_servers={
-            "vsphere": {
-                "type": "stdio",
-                "command": "vmware-aiops",
-                "args": ["mcp"],
-                "env": {
-                    "VMWARE_AIOPS_CONFIG": str(cfg),
-                    "VMWARE_WEB_PASSWORD": s["password"],
-                },
-            }
-        },
-        include_partial_messages=True,
-        max_turns=25,
-        setting_sources=[],
-    )
-    client = ClaudeSDKClient(options=options)
-    await client.connect()
-    s["client"] = client
+
+async def _sweeper() -> None:
+    while True:
+        await asyncio.sleep(600)
+        now = time.time()
+        dead = [sid for sid, s in SESSIONS.items() if now - s["last_active"] > SESSION_TTL_S]
+        for sid in dead:
+            log.info("disposing idle session %s", sid[:8])
+            s = SESSIONS.pop(sid, None)
+            if s:
+                await _dispose(s)
+        # cluster-side stale check (another web replica crashed, or this pod restarted)
+        try:
+            await asyncio.to_thread(_sweep_stale)
+        except Exception:
+            log.exception("periodic stale-session sweep failed")
+
+
+def _sweep_stale():
+    import controller
+    controller.sweep_stale_sessions(set(SESSIONS.keys()))
+
+
+@APP.on_event("startup")
+async def _start_sweeper():
+    # Cluster-side sweep: on restart, web RAM is empty but session pods/secrets survive.
+    def _sweep():
+        import controller
+        controller.sweep_stale_sessions(set(SESSIONS.keys()))
+    try:
+        await asyncio.to_thread(_sweep)
+    except Exception:
+        log.exception("startup stale-session sweep failed")
+    APP.state.sweeper = asyncio.create_task(_sweeper())
 
 
 @APP.get("/healthz")
@@ -163,7 +195,7 @@ async def root(request: Request):
     sid = _scan_sid(request)
     if not sid or not _get_session(sid):
         return HTMLResponse(LOGIN_PAGE.replace("__ERROR__", ""))
-    return RedirectResponse("/chat")
+    return RedirectResponse("/platform")
 
 
 @APP.post("/login")
@@ -173,20 +205,232 @@ async def login(host: str = Form(...), username: str = Form(...),
     username = username.strip()
     err = await asyncio.to_thread(_verify_vcenter, host, username, password, verify_ssl)
     if err:
-        page = LOGIN_PAGE.replace("__ERROR__", f'<p class="err">{err}</p>')
-        return HTMLResponse(page, status_code=401)
+        return HTMLResponse(LOGIN_PAGE.replace("__ERROR__", f'<p class="err">{html.escape(err)}</p>'),
+                            status_code=401)
     sid = uuid.uuid4().hex
     SESSIONS[sid] = {"id": sid, "host": host, "username": username,
                      "password": password, "verify_ssl": verify_ssl,
-                     "created": time.time(), "last_active": time.time(), "client": None}
-    if len(SESSIONS) > MAX_SESSIONS:  # evict oldest; disconnect in background
+                     "created": time.time(), "last_active": time.time(),
+                     "platform": None, "authed": False, "pod_started": False,
+                     "api_key": None}
+    if len(SESSIONS) > MAX_SESSIONS:
         oldest = min(SESSIONS, key=lambda k: SESSIONS[k]["last_active"])
         if oldest != sid:
             old = SESSIONS.pop(oldest)
-            asyncio.ensure_future(_dispose_client(old))
-    resp = RedirectResponse("/chat", status_code=303)
+            asyncio.ensure_future(_dispose(old))
+    resp = RedirectResponse("/platform", status_code=303)
     resp.set_cookie("aisession", _SER.dumps(sid), httponly=True, secure=True, samesite="lax")
     return resp
+
+
+@APP.get("/platform", response_class=HTMLResponse)
+async def platform_page(request: Request):
+    sid = _scan_sid(request)
+    if not sid or not _get_session(sid):
+        return RedirectResponse("/")
+    s = SESSIONS[sid]
+    page = PLATFORM_PAGE.replace("__HOST__", html.escape(s["host"])).replace("__USER__", html.escape(s["username"]))
+    return HTMLResponse(page)
+
+
+@APP.post("/session/start")
+async def session_start(request: Request):
+    sid = _scan_sid(request)
+    if not sid or not _get_session(sid):
+        return JSONResponse({"error": "not signed in"}, status_code=401)
+    s = SESSIONS[sid]
+    s["last_active"] = time.time()
+    form = await request.form()
+    platform = form.get("platform")
+    if platform not in PLATFORMS:
+        return RedirectResponse("/platform", status_code=303)
+    s["platform"] = platform
+    try:
+        def _make():
+            import controller
+            controller.create_session_pod(s["id"], platform, s["host"], s["username"],
+                                          s["password"], s["verify_ssl"])
+        await asyncio.to_thread(_make)
+        s["pod_started"] = True
+    except Exception as e:
+        name = type(e).__name__
+        if name == "SessionLimitReached":
+            return JSONResponse({"error": "Session limit reached — try again later."}, status_code=429)
+        log.exception("session pod create failed")
+        return JSONResponse({"error": f"could not start session: {e}"}, status_code=500)
+    return RedirectResponse("/setup", status_code=303)
+
+
+@APP.get("/setup", response_class=HTMLResponse)
+async def setup_page(request: Request):
+    sid = _scan_sid(request)
+    if not sid or not _get_session(sid):
+        return RedirectResponse("/")
+    s = SESSIONS[sid]
+    platform = s.get("platform")
+    if not platform:
+        return RedirectResponse("/platform")
+    instr = AUTH_INSTRUCTIONS.get(platform, "<p>No instructions for this platform.</p>")
+    page = AUTH_PAGE.replace("__PLATFORM__", html.escape(PLATFORMS[platform]))
+    page = page.replace("__INSTRUCTIONS__", instr)
+    return HTMLResponse(page)
+
+
+def _b64(text: str) -> str:
+    import base64
+    return base64.b64encode(text.encode()).decode()
+
+
+def _provision_pod(s: dict) -> None:
+    """Write per-platform config into the session pod (passwords stay pod-env only)."""
+    import controller
+
+    target_cfg = (
+        "targets:\n"
+        "  - name: web\n"
+        f"    host: {s['host']}\n"
+        "    type: vcenter\n"
+        f"    username: {s['username']}\n"
+        "    port: 443\n"
+        f"    verify_ssl: {str(s['verify_ssl']).lower()}\n"
+        "scanner: {enabled: false}\n"
+        "notify: {webhook_url: ''}\n"
+    )
+    writes: list[tuple[str, str]] = [("/data/config.yaml", target_cfg)]
+
+    mcp_env = {"VMWARE_AIOPS_CONFIG": "/data/config.yaml"}
+    platform = s["platform"]
+    if platform == "claude":
+        writes.append(("/data/mcp.json", json.dumps({
+            "mcpServers": {"vsphere": {"command": "vmware-aiops", "args": ["mcp"], "env": mcp_env}}
+        })))
+    elif platform == "gemini":
+        writes.append(("/data/home/.gemini/settings.json", json.dumps({
+            "mcpServers": {"vsphere": {"command": "vmware-aiops", "args": ["mcp"], "env": mcp_env}}
+        })))
+    elif platform == "codex":
+        # current Codex docs define $HOME/.codex/config.toml with [mcp_servers.<name>]
+        writes.append(("/data/home/.codex/config.toml",
+                       "[mcp_servers.vsphere]\ncommand = \"vmware-aiops\"\nargs = [\"mcp\"]\n"
+                       "env = { VMWARE_AIOPS_CONFIG = \"/data/config.yaml\" }\n"))
+
+    script = "mkdir -p /data/home/.gemini /data/home/.codex /data/home/.claude; "
+    for path, content in writes:
+        script += f"echo {_b64(content)} | base64 -d > {path}; "
+    controller.exec_in_session(s["id"], ["sh", "-c", script])
+    s["provisioned"] = True
+
+
+@APP.get("/session/status")
+async def session_status(request: Request):
+    sid = _scan_sid(request)
+    if not sid or not _get_session(sid):
+        return JSONResponse({"error": "not signed in"}, status_code=401)
+    s = SESSIONS[sid]
+    s["last_active"] = time.time()
+    platform = s.get("platform")
+    if not platform:
+        return {"ready": False, "detail": "platform not chosen"}
+    def _phase():
+        import controller
+        return controller.session_status(s["id"])
+    phase = await asyncio.to_thread(_phase)
+    pod_ready = s.get("pod_started") and phase == "Running"
+    if pod_ready and not s.get("provisioned"):
+        try:
+            await asyncio.to_thread(_provision_pod, s)
+        except Exception:
+            log.exception("provision failed")
+            return {"ready": False, "phase": phase, "detail": "provisioning"}
+    auth_ok = s["authed"] if platform != "codex" else s.get("codex_ready", False)
+    ready = pod_ready and bool(auth_ok) and s.get("provisioned", False)
+    detail = {"phase": phase, "authed": bool(auth_ok)}
+    if s.get("codex_url"):
+        detail["codex_url"] = s["codex_url"]
+        detail["codex_code"] = s.get("codex_code")
+    return {"ready": ready, **detail}
+
+
+@APP.post("/session/auth/key")
+async def auth_key(request: Request):
+    sid = _scan_sid(request)
+    if not sid or not _get_session(sid):
+        return JSONResponse({"error": "not signed in"}, status_code=401)
+    s = SESSIONS[sid]
+    platform = s.get("platform")
+    if platform not in ("claude", "gemini"):
+        return JSONResponse({"error": "api key auth applies to Claude/Gemini"}, status_code=400)
+    form = await request.form()
+    api_key = (form.get("api_key") or "").strip()
+    if not api_key:
+        return RedirectResponse("/setup", status_code=303)
+    s["api_key"] = api_key
+    s["authed"] = True
+    s["last_active"] = time.time()
+    return RedirectResponse("/chat", status_code=303)
+
+
+@APP.post("/session/auth/device")
+async def auth_device(request: Request):
+    sid = _scan_sid(request)
+    if not sid or not _get_session(sid):
+        return JSONResponse({"error": "not signed in"}, status_code=401)
+    s = SESSIONS[sid]
+    if s.get("platform") != "codex":
+        return JSONResponse({"error": "device auth applies to Codex"}, status_code=400)
+    def _start():
+        import controller
+        out = controller.exec_in_session(
+            s["id"],
+            ["sh", "-c", "rm -f /data/device.log; (setsid codex login --device-auth > /data/device.log 2>&1 &) ; echo started"],
+        )
+        return out
+    try:
+        await asyncio.to_thread(_start)
+    except Exception as e:
+        return JSONResponse({"error": f"could not start device auth: {e}"}, status_code=500)
+    s["codex_flow_started_at"] = time.time()
+    s["codex_ready"] = False
+    return RedirectResponse("/setup", status_code=303)
+
+
+DEVICE_URL_RE = re.compile(r"(https://[a-zA-Z0-9./~_-]*openai[a-zA-Z0-9./~_?=&%-]*)")
+DEVICE_CODE_RE = re.compile(r"(?:code|Code)[:\s]+([A-Z0-9-]{6,})")
+
+
+@APP.get("/session/auth/device/poll")
+async def auth_device_poll(request: Request):
+    sid = _scan_sid(request)
+    if not sid or not _get_session(sid):
+        return JSONResponse({"error": "not signed in"}, status_code=401)
+    s = SESSIONS[sid]
+    if s.get("platform") != "codex":
+        return JSONResponse({"error": "device auth applies to Codex"}, status_code=400)
+    if time.time() - s.get("codex_flow_started_at", time.time()) > 600:
+        return JSONResponse({"error": "device auth window expired"}, status_code=408)
+    def _read():
+        import controller
+        log_read = controller.exec_in_session(s["id"], ["cat", "/data/device.log"])
+        status = controller.exec_in_session(s["id"], ["codex", "login", "status"])
+        return log_read, status
+    try:
+        log_text, status_text = await asyncio.to_thread(_read)
+    except Exception as e:
+        return JSONResponse({"error": str(e)[:200]}, status_code=502)
+    if re.search(r"(not logged in|No auth)", status_text or "", re.I):
+        ready = False
+    else:
+        ready = "logged in" in (status_text or "").lower() or "Authenticated" in (status_text or "")
+    url = next(iter(DEVICE_URL_RE.findall(log_text or "")), None)
+    code = next(iter(DEVICE_CODE_RE.findall(log_text or "")), None)
+    if url:
+        s["codex_url"] = url
+    if code:
+        s["codex_code"] = code
+    if ready:
+        s["codex_ready"] = True
+        s["authed"] = True
+    return {"ready": ready, "url": s.get("codex_url"), "code": s.get("codex_code")}
 
 
 @APP.get("/chat", response_class=HTMLResponse)
@@ -195,7 +439,11 @@ async def chat_page(request: Request):
     if not sid or not _get_session(sid):
         return RedirectResponse("/")
     s = SESSIONS[sid]
-    return HTMLResponse(CHAT_PAGE.replace("__HOST__", s["host"]).replace("__USER__", s["username"]))
+    st = await session_status(request)
+    if not st.get("ready"):
+        return RedirectResponse("/setup")
+    return HTMLResponse(CHAT_PAGE.replace("__HOST__", html.escape(s["host"]))
+                        .replace("__USER__", html.escape(s["username"])))
 
 
 @APP.get("/logout")
@@ -203,7 +451,7 @@ async def logout(request: Request):
     sid = _scan_sid(request)
     s = SESSIONS.pop(sid, None) if sid else None
     if s:
-        asyncio.ensure_future(_dispose_client(s))
+        await _dispose(s)
     resp = RedirectResponse("/")
     resp.delete_cookie("aisession")
     return resp
@@ -215,46 +463,49 @@ async def api_chat(request: Request):
     if not sid or not _get_session(sid):
         return JSONResponse({"error": "not signed in"}, status_code=401)
     s = SESSIONS[sid]
+    st = await session_status(request)
+    if not st.get("ready"):
+        return JSONResponse({"error": "session not ready"}, status_code=409)
     s["last_active"] = time.time()
     body = await request.json()
     message = (body.get("message") or "").strip()
     if not message:
         return JSONResponse({"error": "empty"}, status_code=400)
+    platform = s["platform"]
 
-    from claude_agent_sdk import AssistantMessage, ResultMessage, StreamEvent
+    if message.startswith("/model") and platform == "claude":
+        # Claude's /model is a TUI command. In headless mode, per-message model change is a CLI flag.
+        wanted = message.split(None, 1)[1:] or [""]
+        s["model"] = wanted[0].strip() or None
+        return {"text": f"Model for this session set to: {s['model'] or 'account default'}"}
 
-    async def pump():
-        def emit(payload: dict):
-            return f"data: {json.dumps(payload)}\n\n".encode()
+    def _run(prompt: str) -> str:
+        import controller
+        if platform == "claude":
+            model_flag = f" --model {s['model']}" if s.get("model") else ""
+            cmd = (
+                f"printf '%s' {json.dumps(prompt)} | "
+                f"ANTHROPIC_API_KEY={json.dumps(s['api_key'])} "
+                f"claude -p --output-format text{model_flag}"
+                f" --permission-mode bypassPermissions"
+                f" --strict-mcp-config --mcp-config /data/mcp.json"
+                f" --allowedTools 'mcp__vsphere'"
+            )
+        elif platform == "gemini":
+            cmd = (
+                f"printf '%s' {json.dumps(prompt)} | "
+                f"GEMINI_API_KEY={json.dumps(s['api_key'])} gemini -p --output-format text"
+            )
+        else:
+            cmd = f"codex exec --json --skip-git-repo-check < <(printf '%s' {json.dumps(prompt)})"
+        return controller.exec_in_session(s["id"], ["sh", "-c", "cd /data/home 2>/dev/null || cd /data; " + cmd])
 
-        async with _LOCK:  # one SSE stream drives one SDK client at a time
-            try:
-                await _ensure_client(s)
-                client = s["client"]
-                await client.query(message)
-                streamed_any = False
-                async for item in client.receive_response():
-                    if isinstance(item, StreamEvent):
-                        d = item.event.get("delta", {})
-                        if d.get("type") == "text_delta" and d.get("text"):
-                            streamed_any = True
-                            yield emit({"text": d["text"]})
-                    elif isinstance(item, AssistantMessage):
-                        if not streamed_any:
-                            for b in item.content:
-                                if getattr(b, "type", None) == "text":
-                                    yield emit({"text": b.text})
-                    elif isinstance(item, ResultMessage):
-                        if item.is_error:
-                            yield emit({"error": item.result or item.subtype})
-                        if item.permission_denials:
-                            yield emit({"note": f"{len(item.permission_denials)} action(s) were gated"})
-                        yield emit({"done": True})
-            except Exception as e:
-                log.exception("chat failed")
-                yield emit({"error": f"{type(e).__name__}: {str(e)[:300]}"})
-
-    return StreamingResponse(pump(), media_type="text/event-stream")
+    try:
+        out = await asyncio.to_thread(_run, message)
+    except Exception as e:
+        log.exception("chat exec failed")
+        return JSONResponse({"error": f"{type(e).__name__}: {str(e)[:300]}"}, status_code=502)
+    return {"text": out or "(no output)"}
 
 
 if __name__ == "__main__":

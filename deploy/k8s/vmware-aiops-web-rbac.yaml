@@ -1,0 +1,41 @@
+# kubectl apply -f deploy/k8s/vmware-aiops-web-rbac.yaml
+#
+# Identity for the web pod's session controller (app/controller.py): it creates,
+# reads, watches and deletes per-session agent pods and their secrets, and execs
+# commands into the pods. Everything is namespaced to vmware-aiops-web and scoped
+# to exactly those verbs — no cluster-wide rights, no secrets read beyond the
+# per-session ones this controller manages.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: aiops-web
+  namespace: vmware-aiops-web
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: aiops-web-session-manager
+  namespace: vmware-aiops-web
+rules:
+  # Session agent pods: lifecycle + attach for exec_in_session().
+  - apiGroups: [""]
+    resources: ["pods", "pods/exec"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  # Per-session credential secrets (VMWARE_WEB_PASSWORD etc.), deleted on logout.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "get", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: aiops-web-session-manager
+  namespace: vmware-aiops-web
+subjects:
+  - kind: ServiceAccount
+    name: aiops-web
+    namespace: vmware-aiops-web
+roleRef:
+  kind: Role
+  name: aiops-web-session-manager
+  apiGroup: rbac.authorization.k8s.io

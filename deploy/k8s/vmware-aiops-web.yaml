@@ -1,19 +1,12 @@
+# kubectl apply -f deploy/k8s/vmware-aiops-web-rbac.yaml
 # kubectl apply -f deploy/k8s/vmware-aiops-web.yaml
-# Prerequisite secret (holds the Claude gateway token — the app needs a model endpoint):
-#   oc -n vmware-aiops-web create secret generic claude-gateway \
-#     --from-literal=ANTHROPIC_AUTH_TOKEN='<token>'
+# No shared credentials: users authenticate with their own AI-client credential per
+# session (Claude/Gemini API key in memory, or Codex device sign-in), and their own
+# vCenter password. The web pod talks only to the Kubernetes API to spin up session pods.
 # Image is public on ghcr.io/bplein/vmware-aiops-web — no pull secret needed.
 apiVersion: v1
 kind: Namespace
 metadata: {name: vmware-aiops-web}
----
-apiVersion: v1
-kind: ConfigMap
-metadata: {name: web-config, namespace: vmware-aiops-web}
-data:
-  ANTHROPIC_BASE_URL: "https://gpulab.purestorage.com"
-  ANTHROPIC_MODEL: "Kimi-K3-lab-claude-compatible[1m]"
-  WEB_MODEL: "Kimi-K3-lab-claude-compatible[1m]"
 ---
 apiVersion: v1
 kind: Service
@@ -24,7 +17,14 @@ spec:
 ---
 apiVersion: route.openshift.io/v1
 kind: Route
-metadata: {name: vmware-aiops-web, namespace: vmware-aiops-web}
+metadata:
+  name: vmware-aiops-web
+  namespace: vmware-aiops-web
+  annotations:
+    # Web tier scales to 2+ replicas; sessions (SDK clients, stream callbacks) are
+    # stuck to whichever pod served the login. Router-managed cookie affinity pins them.
+    haproxy.router.openshift.io/cookie_name: aiops-session
+    haproxy.router.openshift.io/balance: roundrobin
 spec:
   host: vmware-aiops-web-vmware-aiops-web.apps.ocp1.plein.cna.lab
   to: {kind: Service, name: vmware-aiops-web}
@@ -35,27 +35,37 @@ apiVersion: apps/v1
 kind: Deployment
 metadata: {name: vmware-aiops-web, namespace: vmware-aiops-web}
 spec:
-  replicas: 1
-  strategy: {type: Recreate}   # sessions are in-memory; no concurrent old/new pods
+  replicas: 2                  # stickiness (Route cookie_name) keeps each session on one pod
+  strategy: {type: Recreate}   # sessions live in RAM; in-place updates would drop them mid-stream
   selector: {matchLabels: {app: vmware-aiops-web}}
   template:
     metadata: {labels: {app: vmware-aiops-web}}
     spec:
-      automountServiceAccountToken: false
+      # app/controller.py talks to the Kubernetes API to create/drive per-session
+      # agent pods, so the web pod needs an identity RBAC can grant rights to.
+      # Rights come from vmware-aiops-web-rbac.yaml (apply that first). The mounted
+      # token is what load_incluster_config() reads, hence automount true here;
+      # session pods themselves stay automountServiceAccountToken: false.
+      # The web tier is multi-replica: the controller keeps no per-pod state, all
+      # session/cap accounting goes through the API.
+      serviceAccountName: aiops-web
+      automountServiceAccountToken: true
       securityContext:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: web
           image: ghcr.io/bplein/vmware-aiops-web:latest
           ports: [{containerPort: 8080}]
-          envFrom:
-            - {configMapRef: {name: web-config}}
-            - {secretRef: {name: claude-gateway}}
+          env:
+            - name: POD_NAMESPACE
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+            - name: MAX_SESSION_PODS   # global (namespace-wide) cap on agent pods
+              value: "10"
           readinessProbe: {httpGet: {path: /healthz, port: 8080}}
           livenessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 30}
           # NOTE: claude CLI + node write to HOME and /tmp; RO rootfs deferred.
           securityContext:
-            runAsNonRoot: false        # claude CLI under arbitrary UID needs work first
+            runAsNonRoot: true
             allowPrivilegeEscalation: false
             capabilities: {drop: [ALL]}
           resources:
