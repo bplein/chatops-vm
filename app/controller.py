@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 
 DEFAULT_NAMESPACE = "chatops-vm"
 # Pinned tag — keep in sync with VERSION; never :latest.
-DEFAULT_AGENT_IMAGE = "ghcr.io/bplein/chatops-vm:0.3.2"
+DEFAULT_AGENT_IMAGE = "ghcr.io/bplein/chatops-vm:0.3.3"
 DEFAULT_MAX_SESSION_PODS = 10
 
 # Phases that occupy a slot against MAX_SESSION_PODS. Succeeded/Failed pods
@@ -148,6 +148,47 @@ def _delete_quietly(fn, **kwargs) -> None:
             raise
 
 
+def _platform_boot(platform: str, host: str, username: str, verify_ssl: bool) -> str:
+    """Shell command the session pod runs: write platform configs, then idle.
+
+    Password is NOT in here — it lives in the pod env via the per-session Secret
+    (VMWARE_WEB_PASSWORD) and is only consumed by the vmware-aiops MCP server.
+    """
+    import base64
+    import json as _json
+
+    target = (
+        "targets:\n"
+        "  - name: web\n"
+        f"    host: {host}\n"
+        "    type: vcenter\n"
+        f"    username: {username}\n"
+        "    port: 443\n"
+        f"    verify_ssl: {str(verify_ssl).lower()}\n"
+        "scanner: {enabled: false}\n"
+        "notify: {webhook_url: ''}\n"
+    )
+    mcp_env = {"VMWARE_AIOPS_CONFIG": "/data/config.yaml"}
+    files = {"/data/config.yaml": target}
+    if platform == "claude":
+        files["/data/mcp.json"] = _json.dumps({
+            "mcpServers": {"vsphere": {"command": "vmware-aiops", "args": ["mcp"], "env": mcp_env}}})
+    elif platform == "gemini":
+        files["/data/home/.gemini/settings.json"] = _json.dumps({
+            "mcpServers": {"vsphere": {"command": "vmware-aiops", "args": ["mcp"], "env": mcp_env}}})
+    elif platform == "codex":
+        files["/data/home/.codex/config.toml"] = (
+            "[mcp_servers.vsphere]\n"
+            'command = "vmware-aiops"\nargs = ["mcp"]\n'
+            'env = { VMWARE_AIOPS_CONFIG = "/data/config.yaml" }\n')
+
+    script = "mkdir -p /data/home/.gemini /data/home/.codex /data/home/.claude; "
+    for path, content in files.items():
+        script += f"echo {base64.b64encode(content.encode()).decode()} | base64 -d > {path}; "
+    script += "trap : TERM INT; sleep infinity & wait"
+    return script
+
+
 def create_session_pod(
     session_id: str,
     platform: str,
@@ -200,9 +241,9 @@ def create_session_pod(
         name="agent",
         image=os.environ.get("AGENT_IMAGE", DEFAULT_AGENT_IMAGE),
         image_pull_policy="Always",
-        # Stay alive; the web pod drives everything through exec_in_session().
-        # Trapping TERM/INT keeps the container up for a clean API-level delete.
-        command=["sh", "-c", "trap : TERM INT; sleep infinity & wait"],
+        # Write the platform config files at boot (web-layer provisioning can race a
+        # fast login), then stay alive; the web pod drives everything via exec.
+        command=["sh", "-c", _platform_boot(platform, host, username, verify_ssl)],
         env=[client.V1EnvVar(name="PLATFORM", value=platform)],
         env_from=[client.V1EnvFromSource(secret_ref=client.V1SecretEnvSource(name=name))],
         volume_mounts=[client.V1VolumeMount(name="data", mount_path="/data")],
