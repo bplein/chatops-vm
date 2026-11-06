@@ -74,6 +74,7 @@ h1{{font-size:1.25rem;margin-bottom:4px}}
   <p class="foot">Each choice starts an isolated pod with the client installed; your session ends on sign-out or after 4 idle hours.</p>
 </div>
 <script>{_THEME_JS}</script>
+<div class="vfoot">vmware-aiops __AIOPS_VERSION__</div>
 </body></html>"""
 
 AUTH_PAGE = f"""<!doctype html>
@@ -129,4 +130,5 @@ section pre code{{border:0;background:none;padding:0}}
   setInterval(poll,2500);
 }})();
 </script>
+<div class="vfoot">vmware-aiops __AIOPS_VERSION__</div>
 </body></html>"""

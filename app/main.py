@@ -56,6 +56,16 @@ SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
 _SER = URLSafeSerializer(uuid.uuid4().hex, salt="aiops-web")  # restart = logout all
 
+try:
+    from importlib.metadata import version as _pkgver
+    AIOPS_VERSION = _pkgver("vmware-aiops")
+except Exception:
+    AIOPS_VERSION = "unknown"
+
+
+def _with_version(page: str) -> str:
+    return page.replace("__AIOPS_VERSION__", AIOPS_VERSION)
+
 PLATFORMS = {"claude": "Claude Code", "gemini": "Gemini CLI", "codex": "Codex CLI"}
 
 # Per-platform auth instructions, rendered into AUTH_PAGE. Written frankly:
@@ -197,7 +207,7 @@ def _login_page(request: Request, error: str = "") -> HTMLResponse:
     page = LOGIN_PAGE.replace("__ERROR__", error)
     page = page.replace("__HOSTVALUE__", html.escape(request.cookies.get("aivc_host", ""), quote=True))
     page = page.replace("__USERVALUE__", html.escape(request.cookies.get("aivc_user", ""), quote=True))
-    return HTMLResponse(page)
+    return HTMLResponse(_with_version(page))
 
 
 @APP.get("/", response_class=HTMLResponse)
@@ -245,7 +255,7 @@ async def platform_page(request: Request):
         return RedirectResponse("/")
     s = SESSIONS[sid]
     page = PLATFORM_PAGE.replace("__HOST__", html.escape(s["host"])).replace("__USER__", html.escape(s["username"]))
-    return HTMLResponse(page)
+    return HTMLResponse(_with_version(page))
 
 
 @APP.post("/session/start")
@@ -288,7 +298,7 @@ async def setup_page(request: Request):
     instr = AUTH_INSTRUCTIONS.get(platform, "<p>No instructions for this platform.</p>")
     page = AUTH_PAGE.replace("__PLATFORM__", html.escape(PLATFORMS[platform]))
     page = page.replace("__INSTRUCTIONS__", instr)
-    return HTMLResponse(page)
+    return HTMLResponse(_with_version(page))
 
 
 def _b64(text: str) -> str:
@@ -457,8 +467,9 @@ async def chat_page(request: Request):
     st = await session_status(request)
     if not st.get("ready"):
         return RedirectResponse("/setup")
-    return HTMLResponse(CHAT_PAGE.replace("__HOST__", html.escape(s["host"]))
-                        .replace("__USER__", html.escape(s["username"])))
+    return HTMLResponse(_with_version(
+        CHAT_PAGE.replace("__HOST__", html.escape(s["host"]))
+        .replace("__USER__", html.escape(s["username"]))))
 
 
 @APP.get("/logout")

@@ -42,6 +42,7 @@ a{color:var(--danger);text-decoration:none}a:hover{text-decoration:underline}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .theme{position:fixed;top:14px;right:16px;background:var(--surface);border:1px solid var(--line);
   color:var(--muted);border-radius:8px;padding:6px 10px;font:400 .8125rem/1 inherit}
+.vfoot{position:fixed;bottom:10px;left:16px;color:var(--muted);font-size:.75rem;opacity:.65;pointer-events:none}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 """
 
@@ -97,6 +98,7 @@ h1{{font-size:1.25rem}}
   __ERROR__
 </form>
 <script>{_THEME_JS}</script>
+<div class="vfoot">vmware-aiops __AIOPS_VERSION__</div>
 </body></html>"""
 
 CHAT_PAGE = f"""<!doctype html>
@@ -173,4 +175,5 @@ async function ask(){{
   finally{{sendBtn.disabled=false;q.focus();}}
 }}
 </script>
+<div class="vfoot">vmware-aiops __AIOPS_VERSION__</div>
 </body></html>"""
