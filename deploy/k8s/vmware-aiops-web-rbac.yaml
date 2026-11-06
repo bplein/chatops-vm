@@ -22,9 +22,10 @@ rules:
     resources: ["pods", "pods/exec"]
     verbs: ["create", "get", "list", "watch", "delete"]
   # Per-session credential secrets (VMWARE_WEB_PASSWORD etc.), deleted on logout.
+  # "list" returns metadata only (never data) and is required for stale-session sweeping.
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["create", "get", "delete"]
+    verbs: ["create", "get", "list", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
