@@ -73,11 +73,14 @@ PLATFORMS = {"claude": "Claude Code", "gemini": "Gemini CLI", "codex": "Codex CL
 # Codex device auth uses the user's own ChatGPT account.
 AUTH_INSTRUCTIONS = {
     "claude": (
-        "<p>Open a terminal on any machine where Claude Code is signed in with your account "
-        "(your laptop is fine) and run <code>claude setup-token</code>. Paste the token it prints "
-        "below — it authorizes this session as <b>you</b>. No org API keys needed.</p>"
+        "<p>Open a terminal on any machine where Claude Code is already signed in with your "
+        "enterprise account (your laptop is fine) and run:</p>"
+        "<div class='cmdrow'><code>claude setup-token</code>"
+        "<button type='button' class='copybtn' onclick=\"navigator.clipboard.writeText('claude setup-token');this.textContent='copied';setTimeout(()=>this.textContent='copy',1500)\">copy</button></div>"
+        "<p>Paste the token it prints below — it authorizes this session as <b>you</b>; "
+        "no org API keys needed, and it lives only in this session's pod.</p>"
         "<form method='post' action='/session/auth/key'>"
-        "<label>Claude token (from <code>claude setup-token</code>)</label>"
+        "<label>Claude token</label>"
         "<input type='password' name='api_key' autocomplete='off' required>"
         "<button type='submit'>Save and continue</button></form>"
     ),
@@ -295,8 +298,10 @@ async def setup_page(request: Request):
     if not platform:
         return RedirectResponse("/platform")
     instr = AUTH_INSTRUCTIONS.get(platform, "<p>No instructions for this platform.</p>")
+    err = request.query_params.get("err", "")
     page = AUTH_PAGE.replace("__PLATFORM__", html.escape(PLATFORMS[platform]))
     page = page.replace("__INSTRUCTIONS__", instr)
+    page = page.replace("__ERROR__", f'<p style="color:var(--danger);font-size:.875rem">{html.escape(err)}</p>' if err else "")
     return HTMLResponse(_with_version(page))
 
 
@@ -375,6 +380,44 @@ async def session_status(request: Request):
     return {"ready": ready, **detail}
 
 
+_VALIDATE_SCRIPT = """
+import sys, urllib.request, urllib.error
+key, platform = sys.argv[1], sys.argv[2]
+try:
+    if platform == "claude":
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/models?limit=1",
+            headers={"authorization": "Bearer " + key, "anthropic-version": "2023-06-01"})
+    else:
+        req = urllib.request.Request(
+            "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1",
+            headers={"x-goog-api-key": key})
+    urllib.request.urlopen(req, timeout=10)
+    print("OK")
+except urllib.error.HTTPError as e:
+    print("HTTP", e.code)
+except Exception as e:
+    print("NET", str(e)[:120])
+"""
+
+
+def _validate_ai_credential(s: dict, api_key: str) -> str | None:
+    """Check the credential from inside the session pod (exact egress path)."""
+    import controller
+
+    out = controller.exec_in_session(
+        s["id"], ["python3", "-c", _VALIDATE_SCRIPT, api_key, s["platform"]])
+    out = (out or "").strip()
+    if out == "OK":
+        return None
+    if out.startswith("HTTP 401") or out.startswith("HTTP 403"):
+        return "That credential was rejected by the provider (401/403). Check you pasted the whole token, not the surrounding output."
+    if out.startswith("HTTP 429"):
+        return "Provider rate-limited the check — try again in a minute."
+    # Network failures: accept with a warning; a dead check shouldn't block setup.
+    log.warning("credential validation inconclusive: %s", out[:120])
+
+
 @APP.post("/session/auth/key")
 async def auth_key(request: Request):
     sid = _scan_sid(request)
@@ -385,9 +428,16 @@ async def auth_key(request: Request):
     if platform not in ("claude", "gemini"):
         return JSONResponse({"error": "api key auth applies to Claude/Gemini"}, status_code=400)
     form = await request.form()
-    api_key = (form.get("api_key") or "").strip()
+    api_key = re.sub(r"\s", "", form.get("api_key") or "")
     if not api_key:
         return RedirectResponse("/setup", status_code=303)
+    try:
+        err = await asyncio.to_thread(_validate_ai_credential, s, api_key)
+    except Exception:
+        log.exception("validation exec failed")
+        err = None  # validation infra hiccup must not block setup
+    if err:
+        return RedirectResponse("/setup?err=" + __import__("urllib.parse", fromlist=["quote"]).quote(err), status_code=303)
     s["api_key"] = api_key
     s["authed"] = True
     s["last_active"] = time.time()

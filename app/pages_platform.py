@@ -104,6 +104,7 @@ section pre code{{border:0;background:none;padding:0}}
 <button class="theme" onclick="toggleTheme()">Theme</button>
 <div id="w">
   <h1>Finish setup: __PLATFORM__</h1>
+  __ERROR__
   <p id="status" aria-live="polite"><span class="spin" aria-hidden="true"></span><span id="status-text">Starting&hellip;</span></p>
   <section aria-label="Authentication steps">__INSTRUCTIONS__</section>
   <a class="cancel" href="/logout">Cancel setup (sign out)</a>

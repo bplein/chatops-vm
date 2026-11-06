@@ -10,21 +10,27 @@ _BASE_CSS = """
 :root{
   color-scheme:dark;
   --bg:#101216;--surface:#171A21;--line:#262C38;--field:#0D1015;
-  --text:#E7EAF0;--muted:#8A93A6;--u-log:#A5CBFF;--accent:#5B9DFF;
-  --accent-ink:#0C1322;--danger:#F08080;--float:rgba(16,18,22,.72);--line-soft:rgba(255,255,255,.06);
+  --text:#E7EAF0;--muted:#8A93A6;--u-log:#CDD3DF;--accent:#EDEFF4;
+  --accent-ink:#15171C;--danger:#D98282;--float:rgba(16,18,22,.72);--line-soft:rgba(255,255,255,.06);
 }
 :root[data-theme="light"]{
   color-scheme:light;
   --bg:#F4F5F8;--surface:#FFFFFF;--line:#E2E5EC;--field:#FFFFFF;
-  --text:#1B1F2A;--muted:#67707F;--u-log:#2458C9;--accent:#2F6FED;
-  --accent-ink:#FFFFFF;--danger:#C93636;--float:rgba(244,245,248,.78);--line-soft:rgba(20,24,40,.08);
+  --text:#1B1F2A;--muted:#67707F;--u-log:#3A4150;--accent:#1B1F2A;
+  --accent-ink:#FFFFFF;--danger:#9E2B2B;--float:rgba(244,245,248,.78);--line-soft:rgba(20,24,40,.08);
 }
 @media (prefers-color-scheme:light){:root:not([data-theme]){
   color-scheme:light;
   --bg:#F4F5F8;--surface:#FFFFFF;--line:#E2E5EC;--field:#FFFFFF;
-  --text:#1B1F2A;--muted:#67707F;--u-log:#2458C9;--accent:#2F6FED;
-  --accent-ink:#FFFFFF;--danger:#C93636;--float:rgba(244,245,248,.78);--line-soft:rgba(20,24,40,.08);
+  --text:#1B1F2A;--muted:#67707F;--u-log:#3A4150;--accent:#1B1F2A;
+  --accent-ink:#FFFFFF;--danger:#9E2B2B;--float:rgba(244,245,248,.78);--line-soft:rgba(20,24,40,.08);
 }}
+.cmdrow{display:flex;align-items:center;gap:10px;background:var(--field);border:1px solid var(--line);
+  border-radius:9px;padding:8px 10px;margin:8px 0}
+.cmdrow code{flex:1;font:500 .875rem/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
+.copybtn{border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:7px;
+  padding:4px 10px;font:500 .75rem/1.4 inherit;cursor:pointer}
+.copybtn:active{transform:scale(.97);transition:transform 100ms ease-out}
 *,*::before,*::after{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);
   font:400 15px/1.55 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;
