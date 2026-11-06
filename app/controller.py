@@ -203,7 +203,7 @@ def create_session_pod(
         # Trapping TERM/INT keeps the container up for a clean API-level delete.
         command=["sh", "-c", "trap : TERM INT; sleep infinity & wait"],
         env=[client.V1EnvVar(name="PLATFORM", value=platform)],
-        env_from=[client.V1EnvFromSource(secret_ref=client.V1SecretReference(name=name))],
+        env_from=[client.V1EnvFromSource(secret_ref=client.V1SecretEnvSource(name=name))],
         volume_mounts=[client.V1VolumeMount(name="data", mount_path="/data")],
         security_context=client.V1SecurityContext(
             run_as_non_root=True,
