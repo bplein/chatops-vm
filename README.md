@@ -4,7 +4,7 @@ A multi-user web chat-ops UI for vSphere. Pick an AI client, sign in with your v
 
 ## Clients supported
 
-- **Claude Code** — bring your Anthropic API key (billed by Anthropic to the key's org). Native claude.ai enterprise/subscription login can't be embedded by third-party Agent-SDK apps; API keys are the documented path for this shape.
+- **Claude Code** — paste the token from `claude setup-token` on any machine where Claude Code is already signed in with your enterprise account. No org API key needed; tokens live only in your session pod's environment.
 - **Gemini CLI** — bring a Gemini API key from Google AI Studio (has a free tier).
 - **Codex CLI** — sign in with your ChatGPT account via device code, in Codex's native headless flow.
 - **OpenCode** is deliberately deferred.

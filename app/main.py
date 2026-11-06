@@ -73,13 +73,12 @@ PLATFORMS = {"claude": "Claude Code", "gemini": "Gemini CLI", "codex": "Codex CL
 # Codex device auth uses the user's own ChatGPT account.
 AUTH_INSTRUCTIONS = {
     "claude": (
-        "<p>Claude Code needs an Anthropic <b>API key</b> (Console &rarr; API keys). "
-        "Spend bills to the key's organization.</p>"
-        "<p><i>Native claude.ai/enterprise sign-in can't be embedded in this app "
-        "(SDK terms); API-key auth is the supported path.</i></p>"
+        "<p>On any machine where Claude Code is signed in (typically your laptop), run "
+        "<code>claude setup-token</code> and paste the token below. It authorizes this session "
+        "as <b>you</b>, against your enterprise account — no org API keys needed.</p>"
         "<form method='post' action='/session/auth/key'>"
-        "<label>Anthropic API key</label>"
-        "<input type='password' name='api_key' placeholder='sk-ant-...' autocomplete='off' required>"
+        "<label>Claude token (from <code>claude setup-token</code>)</label>"
+        "<input type='password' name='api_key' autocomplete='off' required>"
         "<button type='submit'>Save and continue</button></form>"
     ),
     "gemini": (
@@ -511,7 +510,7 @@ async def api_chat(request: Request):
             model_flag = f" --model {s['model']}" if s.get("model") else ""
             cmd = (
                 f"printf '%s' {json.dumps(prompt)} | "
-                f"ANTHROPIC_API_KEY={json.dumps(s['api_key'])} "
+                f"ANTHROPIC_AUTH_TOKEN={json.dumps(s['api_key'])} "
                 f"claude -p --output-format text{model_flag}"
                 f" --permission-mode bypassPermissions"
                 f" --strict-mcp-config --mcp-config /data/mcp.json"
