@@ -15,7 +15,7 @@ from pages import _BASE_CSS, _THEME_JS
 PLATFORM_PAGE = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>vSphere Ops — Choose your AI client</title>
+<title>ChatOps VM — Choose your AI client</title>
 <style>{_BASE_CSS}
 #w{{max-width:60ch;margin:0 auto;padding:32px 16px 48px}}
 header{{display:flex;align-items:baseline;gap:10px;padding:6px 2px 14px;
@@ -37,7 +37,7 @@ h1{{font-size:1.25rem;margin-bottom:4px}}
 <button class="theme" onclick="toggleTheme()">Theme</button>
 <div id="w">
   <header>
-    <b>vSphere Ops</b>
+    <b>ChatOps VM</b>
     <span class="who">__USER__ @ __HOST__</span>
   </header>
   <h1>Choose your AI client</h1>
@@ -80,7 +80,7 @@ h1{{font-size:1.25rem;margin-bottom:4px}}
 AUTH_PAGE = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>vSphere Ops — Finish setup</title>
+<title>ChatOps VM — Finish setup</title>
 <style>{_BASE_CSS}
 #w{{max-width:60ch;margin:0 auto;padding:32px 16px 48px}}
 h1{{font-size:1.25rem;margin-bottom:14px}}

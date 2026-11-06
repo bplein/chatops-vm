@@ -1,4 +1,4 @@
-# vmware-aiops-web
+# chatops-vm
 
 A multi-user web chat-ops UI for vSphere. Pick an AI client, sign in with your vCenter credentials, and drive the environment from the browser.
 
@@ -24,19 +24,19 @@ The lab-deployed Claude sessions honor the vSphere-gated upstream skill: `vmware
 ## Deploy (lab)
 
 ```
-oc apply -f deploy/k8s/vmware-aiops-web-rbac.yaml
-oc apply -f deploy/k8s/vmware-aiops-web.yaml
+oc apply -f deploy/k8s/chatops-vm-rbac.yaml
+oc apply -f deploy/k8s/chatops-vm.yaml
 ```
 
 No image pull secret needed (GHCR package is public). No shared token secret needed: users bring the model credential.
 
-Route host: `vmware-aiops-web-vmware-aiops-web.apps.ocp1.plein.cna.lab` (edge TLS + redirect; cookie-based session affinity pins each browser to its web pod).
+Route host: `chatops-vm-chatops-vm.apps.ocp1.plein.cna.lab` (edge TLS + redirect; cookie-based session affinity pins each browser to its web pod).
 
 ## Run locally
 
 ```
 pip install -r requirements.txt
-DATA_DIR=/tmp/aiops-web python app/main.py     # binds http :8080
+DATA_DIR=/tmp/chatops-vm python app/main.py    # binds http :8080
 ```
 
 You need a kubeconfig pointing at the cluster where session pods should live (controller falls back to `~/.kube/config` outside a pod).

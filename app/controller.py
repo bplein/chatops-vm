@@ -1,4 +1,4 @@
-"""Kubernetes session-pod controller for vmware-aiops-web.
+"""Kubernetes session-pod controller for chatops-vm.
 
 The web pod is the only component that talks to the Kubernetes API. For each
 logged-in user session it creates one ephemeral agent pod, plus a per-session
@@ -25,8 +25,8 @@ import time
 
 log = logging.getLogger(__name__)
 
-DEFAULT_NAMESPACE = "vmware-aiops-web"
-DEFAULT_AGENT_IMAGE = "ghcr.io/bplein/vmware-aiops-web:latest"
+DEFAULT_NAMESPACE = "chatops-vm"
+DEFAULT_AGENT_IMAGE = "ghcr.io/bplein/chatops-vm:latest"
 DEFAULT_MAX_SESSION_PODS = 10
 
 # Phases that occupy a slot against MAX_SESSION_PODS. Succeeded/Failed pods

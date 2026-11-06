@@ -1,4 +1,4 @@
-"""vmware-aiops-web: multi-user, per-session chat-ops for vSphere.
+"""chatops-vm: multi-user, per-session chat-ops for vSphere.
 
 Flow: vCenter sign-in -> choose AI client (Claude Code / Gemini CLI / Codex CLI)
 -> authenticate that client (API key paste, or Codex device-code)
@@ -46,7 +46,7 @@ for _k in _SCRUB:
 
 log = logging.getLogger("web")
 
-APP = FastAPI(title="vmware-aiops-web")
+APP = FastAPI(title="chatops-vm")
 SESSION_TTL_S = 4 * 3600
 MAX_SESSIONS = int(os.environ.get("MAX_SESSIONS", "8"))
 

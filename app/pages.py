@@ -65,7 +65,7 @@ _THEME_JS = """
 LOGIN_PAGE = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>vSphere Ops — Sign in</title>
+<title>ChatOps VM — Sign in</title>
 <style>{_BASE_CSS}
 body{{min-height:100vh;display:grid;place-items:center;padding:24px}}
 .card{{width:min(380px,100%);background:var(--surface);border:1px solid var(--line);
@@ -82,7 +82,7 @@ h1{{font-size:1.25rem}}
 <body>
 <button class="theme" onclick="toggleTheme()">Theme</button>
 <form class="card" method="post" action="/login">
-  <h1>vSphere Ops</h1>
+  <h1>ChatOps VM</h1>
   <p class="sub">Chat with your vCenter. Credentials are verified once against the vCenter and held in server memory for this session only — never written to disk, never shared between users.</p>
   <label for="host">vCenter host</label>
   <input id="host" name="host" type="text" placeholder="vcenter01.example.com" autocomplete="off" value="__HOSTVALUE__" required>
@@ -104,7 +104,7 @@ h1{{font-size:1.25rem}}
 CHAT_PAGE = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>vSphere Ops</title>
+<title>ChatOps VM</title>
 <style>{_BASE_CSS}
 #w{{max-width:72ch;margin:0 auto;padding:20px 16px 140px}}
 header{{display:flex;align-items:baseline;gap:10px;padding:6px 2px 12px;border-bottom:1px solid var(--line);margin-bottom:18px}}
@@ -132,7 +132,7 @@ header b{{font-size:1.0625rem;letter-spacing:-0.015em}}
 <button class="theme" onclick="toggleTheme()">Theme</button>
 <div id="w">
   <header>
-    <b>vSphere Ops</b>
+    <b>ChatOps VM</b>
     <span class="who">__USER__ @ __HOST__</span>
     <a class="out" href="/logout">Sign out</a>
   </header>
@@ -161,7 +161,7 @@ async function ask(){{
   const text=q.value.trim();if(!text)return;
   q.value='';q.style.height='auto';sendBtn.disabled=true;
   add('user','You').querySelector('p').textContent=text;
-  const box=add('assistant','vSphere Ops');const p=box.querySelector('p');
+  const box=add('assistant','ChatOps VM');const p=box.querySelector('p');
   p.innerHTML='<span class="thinking"></span>';
   try{{
     const r=await fetch('/api/chat',{{method:'POST',

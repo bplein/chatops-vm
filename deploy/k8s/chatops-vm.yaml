@@ -1,49 +1,49 @@
-# kubectl apply -f deploy/k8s/vmware-aiops-web-rbac.yaml
-# kubectl apply -f deploy/k8s/vmware-aiops-web.yaml
+# kubectl apply -f deploy/k8s/chatops-vm-rbac.yaml
+# kubectl apply -f deploy/k8s/chatops-vm.yaml
 # No shared credentials: users authenticate with their own AI-client credential per
 # session (Claude/Gemini API key in memory, or Codex device sign-in), and their own
 # vCenter password. The web pod talks only to the Kubernetes API to spin up session pods.
-# Image is public on ghcr.io/bplein/vmware-aiops-web — no pull secret needed.
+# Image is public on ghcr.io/bplein/chatops-vm — no pull secret needed.
 apiVersion: v1
 kind: Namespace
-metadata: {name: vmware-aiops-web}
+metadata: {name: chatops-vm}
 ---
 apiVersion: v1
 kind: Service
-metadata: {name: vmware-aiops-web, namespace: vmware-aiops-web}
+metadata: {name: chatops-vm, namespace: chatops-vm}
 spec:
-  selector: {app: vmware-aiops-web}
+  selector: {app: chatops-vm}
   ports: [{name: http, port: 80, targetPort: 8080}]
 ---
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: vmware-aiops-web
-  namespace: vmware-aiops-web
+  name: chatops-vm
+  namespace: chatops-vm
   annotations:
     # Web tier scales to 2+ replicas; sessions (SDK clients, stream callbacks) are
     # stuck to whichever pod served the login. Router-managed cookie affinity pins them.
     haproxy.router.openshift.io/cookie_name: aiops-session
     haproxy.router.openshift.io/balance: roundrobin
 spec:
-  host: vmware-aiops-web-vmware-aiops-web.apps.ocp1.plein.cna.lab
-  to: {kind: Service, name: vmware-aiops-web}
+  host: chatops-vm-chatops-vm.apps.ocp1.plein.cna.lab
+  to: {kind: Service, name: chatops-vm}
   port: {targetPort: http}
   tls: {termination: edge, insecureEdgeTerminationPolicy: Redirect}
 ---
 apiVersion: apps/v1
 kind: Deployment
-metadata: {name: vmware-aiops-web, namespace: vmware-aiops-web}
+metadata: {name: chatops-vm, namespace: chatops-vm}
 spec:
   replicas: 2                  # stickiness (Route cookie_name) keeps each session on one pod
   strategy: {type: Recreate}   # sessions live in RAM; in-place updates would drop them mid-stream
-  selector: {matchLabels: {app: vmware-aiops-web}}
+  selector: {matchLabels: {app: chatops-vm}}
   template:
-    metadata: {labels: {app: vmware-aiops-web}}
+    metadata: {labels: {app: chatops-vm}}
     spec:
       # app/controller.py talks to the Kubernetes API to create/drive per-session
       # agent pods, so the web pod needs an identity RBAC can grant rights to.
-      # Rights come from vmware-aiops-web-rbac.yaml (apply that first). The mounted
+      # Rights come from chatops-vm-rbac.yaml (apply that first). The mounted
       # token is what load_incluster_config() reads, hence automount true here;
       # session pods themselves stay automountServiceAccountToken: false.
       # The web tier is multi-replica: the controller keeps no per-pod state, all
@@ -54,7 +54,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: web
-          image: ghcr.io/bplein/vmware-aiops-web:latest
+          image: ghcr.io/bplein/chatops-vm:latest
           ports: [{containerPort: 8080}]
           env:
             - name: POD_NAMESPACE
