@@ -27,8 +27,13 @@ log = logging.getLogger(__name__)
 
 DEFAULT_NAMESPACE = "chatops-vm"
 # Pinned tag — keep in sync with VERSION; never :latest.
-DEFAULT_AGENT_IMAGE = "ghcr.io/bplein/chatops-vm:0.3.3"
+DEFAULT_AGENT_IMAGE = "ghcr.io/bplein/chatops-vm:0.3.4"
 DEFAULT_MAX_SESSION_PODS = 10
+
+# Annotation stamped by the web layer on every chat message. The periodic
+# stale sweep is annotation-based (not web-RAM-based) so several web replicas
+# can run the sweeper without one replica deleting another's live sessions.
+LAST_CHAT_ANNOTATION = "aiops-web/last-chat"
 
 # Phases that occupy a slot against MAX_SESSION_PODS. Succeeded/Failed pods
 # are inert; callers should delete_session() them, but they don't count.
@@ -125,7 +130,12 @@ def list_stale_sessions(live_ids: set[str]) -> list[str]:
 
 
 def sweep_stale_sessions(live_ids: set[str]) -> list[str]:
-    """Delete orphaned session pods+secrets; returns the ids removed."""
+    """Delete orphaned session pods+secrets; returns the ids removed.
+
+    RAM-based: ONLY safe at web startup (this replica's RAM is legitimately
+    empty). Never run periodically with >1 replica — replica B would treat
+    replica A's live sessions as stale and delete them.
+    """
     removed: list[str] = []
     for sid in list_stale_sessions(live_ids):
         try:
@@ -133,6 +143,55 @@ def sweep_stale_sessions(live_ids: set[str]) -> list[str]:
             removed.append(sid)
         except Exception:
             log.warning("stale sweep failed for %s", sid, exc_info=True)
+    return removed
+
+
+def touch_session(session_id: str) -> None:
+    """Stamp the session pod with 'last activity now' (cross-replica sweep input)."""
+    from kubernetes.client.rest import ApiException
+
+    core = get_core_v1()
+    try:
+        core.patch_namespaced_pod(
+            name=_resource_name(session_id),
+            namespace=_namespace(),
+            body={"metadata": {"annotations": {LAST_CHAT_ANNOTATION: str(time.time())}}},
+        )
+    except ApiException as e:
+        if e.status != 404:
+            raise
+
+
+def sweep_idle_sessions(ttl_s: float) -> list[str]:
+    """Delete session pods+secrets idle past ttl_s, judged by the pod's
+    last-chat annotation (falling back to pod creation time).
+
+    Safe on every replica: a live session on ANY replica gets its annotation
+    refreshed on each chat message, so it is never seen as idle here. Only
+    genuinely abandoned pods (owner crashed/was replaced, user walked away)
+    age out. Returns the ids removed.
+    """
+    core = get_core_v1()
+    ns = _namespace()
+    pods = core.list_namespaced_pod(namespace=ns, label_selector=SESSION_LABEL_KEY)
+    now = time.time()
+    removed: list[str] = []
+    for p in pods.items:
+        meta = p.metadata
+        ann = (meta.annotations or {}).get(LAST_CHAT_ANNOTATION)
+        try:
+            last = float(ann) if ann else meta.creation_timestamp.timestamp()
+        except (TypeError, ValueError):
+            last = 0.0
+        if now - last <= ttl_s:
+            continue
+        sid = (meta.labels or {}).get(SESSION_LABEL_KEY) or meta.name.split("-", 2)[-1]
+        try:
+            delete_session(sid)
+            removed.append(sid)
+            log.info("swept idle session %s (idle %.0fm)", sid[:8], (now - last) / 60)
+        except Exception:
+            log.warning("idle sweep failed for %s", sid, exc_info=True)
     return removed
 
 
@@ -241,6 +300,13 @@ def create_session_pod(
         name="agent",
         image=os.environ.get("AGENT_IMAGE", DEFAULT_AGENT_IMAGE),
         image_pull_policy="Always",
+        # Non-BestEffort QoS: BestEffort pods are evicted first under node
+        # memory pressure, which is the suspected cause of mid-chat pod deaths.
+        # Generous headroom; the CLI + MCP server stay well under the limit.
+        resources=client.V1ResourceRequirements(
+            requests={"cpu": "200m", "memory": "512Mi"},
+            limits={"memory": "2Gi"},
+        ),
         # Write the platform config files at boot (web-layer provisioning can race a
         # fast login), then stay alive; the web pod drives everything via exec.
         command=["sh", "-c", _platform_boot(platform, host, username, verify_ssl)],
@@ -255,7 +321,10 @@ def create_session_pod(
         ),
     )
     pod = client.V1Pod(
-        metadata=client.V1ObjectMeta(name=name, namespace=ns, labels=labels),
+        metadata=client.V1ObjectMeta(
+            name=name, namespace=ns, labels=labels,
+            annotations={LAST_CHAT_ANNOTATION: str(time.time())},
+        ),
         spec=client.V1PodSpec(
             restart_policy="Never",
             automount_service_account_token=False,

@@ -172,16 +172,20 @@ async def _sweeper() -> None:
             s = SESSIONS.pop(sid, None)
             if s:
                 await _dispose(s)
-        # cluster-side stale check (another web replica crashed, or this pod restarted)
+        # cluster-side idle sweep: annotation-based, so it is safe to run from
+        # every replica (a live session on ANOTHER replica is refreshed by its
+        # own chats and never looks idle here). A RAM-based sweep would let one
+        # replica delete another replica's live sessions.
         try:
-            await asyncio.to_thread(_sweep_stale)
+            await asyncio.to_thread(_sweep_idle_cluster)
         except Exception:
-            log.exception("periodic stale-session sweep failed")
+            log.exception("periodic idle-session sweep failed")
 
 
-def _sweep_stale():
+def _sweep_idle_cluster():
     import controller
-    controller.sweep_stale_sessions(set(SESSIONS.keys()))
+    for sid in controller.sweep_idle_sessions(SESSION_TTL_S):
+        SESSIONS.pop(sid, None)
 
 
 @APP.on_event("startup")
@@ -521,6 +525,50 @@ async def chat_page(request: Request):
         .replace("__USER__", html.escape(s["username"]))))
 
 
+async def _maybe_revive(s: dict, st: dict, request: Request) -> dict:
+    """Recreate a dead session pod once, then re-check status.
+
+    Key-based platforms (Claude/Gemini) recover silently: the credential lives
+    in web RAM and is re-supplied on the next exec. Codex keeps its sign-in
+    inside the pod, so a revived pod is unauthenticated and the user must redo
+    setup. Conversation history (which lives in the pod) is not recoverable.
+    Rate-limited to one attempt per 30s per session.
+    """
+    if not s.get("pod_started"):
+        return st
+    if st.get("phase") not in ("Failed", "Succeeded", "missing"):
+        return st
+    if time.time() - s.get("revive_ts", 0.0) < 30:
+        return st
+    s["revive_ts"] = time.time()
+    platform = s.get("platform")
+    if platform == "codex":
+        s["authed"] = False
+        s["codex_ready"] = False
+        st = dict(st)
+        st["detail"] = "pod exited; Codex sign-in was lost, redo setup"
+        return st
+    log.info("reviving dead session pod %s (phase=%s)", s["id"][:8], st.get("phase"))
+
+    def _do():
+        import controller
+        controller.delete_session(s["id"])
+        for _ in range(60):  # wait for the dead pod object to clear (same name)
+            if controller.session_status(s["id"]) == "missing":
+                break
+            time.sleep(1)
+        controller.create_session_pod(s["id"], platform, s["host"], s["username"],
+                                      s["password"], s["verify_ssl"])
+    try:
+        await asyncio.to_thread(_do)
+    except Exception:
+        log.exception("session revive failed")
+        return st
+    s["provisioned"] = False
+    s["claude_session"] = None
+    return await session_status(request)
+
+
 @APP.get("/logout")
 async def logout(request: Request):
     sid = _scan_sid(request)
@@ -540,7 +588,10 @@ async def api_chat(request: Request):
     s = SESSIONS[sid]
     st = await session_status(request)
     if not st.get("ready"):
-        return JSONResponse({"error": "session not ready"}, status_code=409)
+        st = await _maybe_revive(s, st, request)
+    if not st.get("ready"):
+        why = st.get("detail") or st.get("phase") or st.get("error") or "starting"
+        return JSONResponse({"error": f"session not ready ({why})"}, status_code=409)
     s["last_active"] = time.time()
     body = await request.json()
     message = (body.get("message") or "").strip()
@@ -554,18 +605,61 @@ async def api_chat(request: Request):
         s["model"] = wanted[0].strip() or None
         return {"text": f"Model for this session set to: {s['model'] or 'account default'}"}
 
+    def _claude_cmd(prompt: str) -> str:
+        resume_flag = f" --resume {s['claude_session']}" if s.get("claude_session") else ""
+        model_flag = f" --model {s['model']}" if s.get("model") else ""
+        return (
+            f"printf '%s' {json.dumps(prompt)} | "
+            f"ANTHROPIC_AUTH_TOKEN={json.dumps(s['api_key'])} "
+            f"claude -p --output-format json{model_flag}{resume_flag}"
+            f" --permission-mode bypassPermissions"
+            f" --strict-mcp-config --mcp-config /data/mcp.json"
+            f" --allowedTools 'mcp__vsphere'"
+        )
+
+    def _claude_result(raw: str) -> tuple[str, bool]:
+        """Parse Claude's --output-format json envelope.
+
+        Returns (reply_text, resume_broken). Tracks the conversation id so the
+        next message continues this one (headless claude is stateless without
+        --resume). resume_broken=True means the stored id no longer resolves.
+        """
+        data = None
+        text = (raw or "").strip()
+        try:
+            data = json.loads(text)
+        except ValueError:
+            for line in reversed(text.splitlines()):
+                line = line.strip()
+                if line.startswith("{"):
+                    try:
+                        data = json.loads(line)
+                        break
+                    except ValueError:
+                        continue
+        if not isinstance(data, dict):
+            return raw, False
+        if data.get("session_id"):
+            s["claude_session"] = data["session_id"]
+        result = data.get("result") or ""
+        if data.get("is_error") and "no conversation found" in result.lower():
+            return "", True
+        return (result or raw), False
+
     def _run(prompt: str) -> str:
         import controller
+        shell_prefix = ["sh", "-c", "cd /data/home 2>/dev/null || cd /data; "]
         if platform == "claude":
-            model_flag = f" --model {s['model']}" if s.get("model") else ""
-            cmd = (
-                f"printf '%s' {json.dumps(prompt)} | "
-                f"ANTHROPIC_AUTH_TOKEN={json.dumps(s['api_key'])} "
-                f"claude -p --output-format text{model_flag}"
-                f" --permission-mode bypassPermissions"
-                f" --strict-mcp-config --mcp-config /data/mcp.json"
-                f" --allowedTools 'mcp__vsphere'"
-            )
+            out = controller.exec_in_session(s["id"], shell_prefix + [_claude_cmd(prompt)])
+            text, broken = _claude_result(out)
+            if broken:
+                # Resumed a dead conversation (pod recreated? id expired): start
+                # fresh rather than erroring; history restarts from this message.
+                log.info("resume id %s gone; starting fresh conversation", str(s.get("claude_session"))[:8])
+                s["claude_session"] = None
+                out = controller.exec_in_session(s["id"], shell_prefix + [_claude_cmd(prompt)])
+                text, _ = _claude_result(out)
+            return text
         elif platform == "gemini":
             cmd = (
                 f"printf '%s' {json.dumps(prompt)} | "
@@ -573,13 +667,22 @@ async def api_chat(request: Request):
             )
         else:
             cmd = f"codex exec --json --skip-git-repo-check < <(printf '%s' {json.dumps(prompt)})"
-        return controller.exec_in_session(s["id"], ["sh", "-c", "cd /data/home 2>/dev/null || cd /data; " + cmd])
+        return controller.exec_in_session(s["id"], shell_prefix + [cmd])
 
     try:
         out = await asyncio.to_thread(_run, message)
     except Exception as e:
         log.exception("chat exec failed")
         return JSONResponse({"error": f"{type(e).__name__}: {str(e)[:300]}"}, status_code=502)
+
+    def _touch():
+        try:
+            import controller
+            controller.touch_session(sid)
+        except Exception:
+            log.debug("activity touch failed", exc_info=True)
+    asyncio.ensure_future(asyncio.to_thread(_touch))
+
     return {"text": out or "(no output)"}
 
 
