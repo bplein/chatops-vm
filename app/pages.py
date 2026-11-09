@@ -187,5 +187,7 @@ async function ask(){{
   }}catch(e){{box.classList.add('error');p.textContent='Connection lost mid-answer. Try again.';}}
   finally{{sendBtn.disabled=false;q.focus();}}
 }}
+const welcome=add('assistant','ChatOps VM');
+welcome.querySelector('p').textContent='Connected to __HOST__ as __USER__. What would you like to do today?';
 </script>
 </body></html>"""
