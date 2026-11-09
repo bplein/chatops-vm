@@ -56,16 +56,20 @@ a{color:var(--danger);text-decoration:none}a:hover{text-decoration:underline}
 
 _THEME_JS = """
 (function(){
-  const KEY='aiops-theme';
-  const cur=localStorage.getItem(KEY);
-  if(cur)document.documentElement.dataset.theme=cur;
+  function ckGet(n){try{var m=document.cookie.match('(?:^|; )'+n+'=([^;]*)');
+    return m?decodeURIComponent(m[1]):null;}catch(e){return null;}}
+  function ckSet(n,v){try{document.cookie=n+'='+v+';path=/;max-age=31536000;samesite=lax';}catch(e){}}
+  var cur=ckGet('aitheme');
+  if(cur!=='light'&&cur!=='dark')cur='dark';
+  document.documentElement.dataset.theme=cur;
+  function label(){var b=document.querySelector('.theme');
+    if(b)b.textContent=cur==='light'?'Dark':'Light';}
+  label();
   window.toggleTheme=function(){
-    const now=document.documentElement.dataset.theme ||
-      (matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');
-    const next=now==='light'?'dark':'light';
-    document.documentElement.dataset.theme=next;
-    try{localStorage.setItem(KEY,next);}catch(e){}
-    const b=document.querySelector('.theme');if(b)b.textContent=next==='light'?'Dark':'Light';
+    cur=cur==='light'?'dark':'light';
+    document.documentElement.dataset.theme=cur;
+    ckSet('aitheme',cur);
+    label();
   };
 })();
 """

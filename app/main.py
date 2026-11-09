@@ -648,16 +648,18 @@ async def api_chat(request: Request):
 
     def _run(prompt: str) -> str:
         import controller
-        shell_prefix = ["sh", "-c", "cd /data/home 2>/dev/null || cd /data; "]
+        # sh -c takes the command as its single next argument; anything after it
+        # becomes $0/$1, so the prefix MUST be concatenated into one string.
+        shell = "cd /data/home 2>/dev/null || cd /data; "
         if platform == "claude":
-            out = controller.exec_in_session(s["id"], shell_prefix + [_claude_cmd(prompt)])
+            out = controller.exec_in_session(s["id"], ["sh", "-c", shell + _claude_cmd(prompt)])
             text, broken = _claude_result(out)
             if broken:
                 # Resumed a dead conversation (pod recreated? id expired): start
                 # fresh rather than erroring; history restarts from this message.
                 log.info("resume id %s gone; starting fresh conversation", str(s.get("claude_session"))[:8])
                 s["claude_session"] = None
-                out = controller.exec_in_session(s["id"], shell_prefix + [_claude_cmd(prompt)])
+                out = controller.exec_in_session(s["id"], ["sh", "-c", shell + _claude_cmd(prompt)])
                 text, _ = _claude_result(out)
             return text
         elif platform == "gemini":
@@ -667,7 +669,7 @@ async def api_chat(request: Request):
             )
         else:
             cmd = f"codex exec --json --skip-git-repo-check < <(printf '%s' {json.dumps(prompt)})"
-        return controller.exec_in_session(s["id"], shell_prefix + [cmd])
+        return controller.exec_in_session(s["id"], ["sh", "-c", shell + cmd])
 
     try:
         out = await asyncio.to_thread(_run, message)
