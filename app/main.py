@@ -625,7 +625,7 @@ async def api_chat(request: Request):
             f"claude -p --output-format json{model_flag}{resume_flag}"
             f" --permission-mode bypassPermissions"
             f" --strict-mcp-config --mcp-config /data/mcp.json"
-            f" --allowedTools 'mcp__vsphere'"
+            f" --allowedTools mcp__vsphere 'Bash(govc:*)'"
         )
 
     def _claude_result(raw: str) -> tuple[str, bool]:
@@ -661,7 +661,14 @@ async def api_chat(request: Request):
         import controller
         # sh -c takes the command as its single next argument; anything after it
         # becomes $0/$1, so the prefix MUST be concatenated into one string.
-        shell = "cd /data/home 2>/dev/null || cd /data; "
+        # GOVC_* maps the per-session Secret env onto govc so the CLIs can reach
+        # the full vSphere API (clone-to-pool, relocate, folders…) via Bash.
+        shell = (
+            "cd /data/home 2>/dev/null || cd /data; "
+            "export GOVC_URL=https://$VCENTER_HOST GOVC_USERNAME=\"$VCENTER_USERNAME\" "
+            "GOVC_PASSWORD=\"$VMWARE_WEB_PASSWORD\"; "
+            "if [ \"$VERIFY_SSL\" != true ]; then export GOVC_INSECURE=true; fi; "
+        )
         if platform == "claude":
             out = controller.exec_in_session(s["id"], ["sh", "-c", shell + _claude_cmd(prompt)])
             text, broken = _claude_result(out)

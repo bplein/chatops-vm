@@ -25,6 +25,9 @@ metadata:
     # stuck to whichever pod served the login. Router-managed cookie affinity pins them.
     haproxy.router.openshift.io/cookie_name: aiops-session
     haproxy.router.openshift.io/balance: roundrobin
+    # /api/chat is synchronous until the CLI answers; agentic turns run minutes.
+    # Default router server timeout would sever them ("connection lost mid-answer").
+    haproxy.router.openshift.io/timeout: 15m
 spec:
   host: chatops-vm-chatops-vm.apps.ocp1.plein.cna.lab
   to: {kind: Service, name: chatops-vm}
@@ -55,7 +58,7 @@ spec:
       containers:
         - name: web
           # Pinned tag — bump with VERSION on release; never :latest.
-          image: ghcr.io/bplein/chatops-vm:0.3.7
+          image: ghcr.io/bplein/chatops-vm:0.3.8
           imagePullPolicy: IfNotPresent
           ports: [{containerPort: 8080}]
           env:
