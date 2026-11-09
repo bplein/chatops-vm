@@ -55,7 +55,7 @@ spec:
       containers:
         - name: web
           # Pinned tag — bump with VERSION on release; never :latest.
-          image: ghcr.io/bplein/chatops-vm:0.3.6
+          image: ghcr.io/bplein/chatops-vm:0.3.7
           imagePullPolicy: IfNotPresent
           ports: [{containerPort: 8080}]
           env:

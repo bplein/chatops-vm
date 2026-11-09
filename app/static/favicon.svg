@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <style>
+    .bg { fill: #101216 } .ink { fill: #EDEFF4 } .stroke { stroke: #EDEFF4 }
+    @media (prefers-color-scheme: light) {
+      .bg { fill: #FFFFFF } .ink { fill: #1B1F2A } .stroke { stroke: #1B1F2A }
+    }
+  </style>
+  <rect class="bg" width="64" height="64" rx="14"/>
+  <polyline class="stroke" points="20,19 36,32 20,45" fill="none"
+            stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect class="ink" x="40" y="38" width="10" height="10" rx="2"/>
+</svg>

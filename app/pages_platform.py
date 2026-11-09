@@ -16,6 +16,8 @@ PLATFORM_PAGE = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ChatOps VM — Choose your AI client</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <style>{_BASE_CSS}
 #w{{max-width:64ch;margin:0 auto;padding:0 16px}}
 header{{display:flex;align-items:baseline;gap:10px;padding:6px 2px 14px;
@@ -83,6 +85,8 @@ AUTH_PAGE = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ChatOps VM — Finish setup</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <style>{_BASE_CSS}
 #w{{max-width:64ch;margin:0 auto;padding:0 16px}}
 h1{{font-size:1.25rem;margin-bottom:14px}}

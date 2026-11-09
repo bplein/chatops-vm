@@ -23,6 +23,7 @@ from pathlib import Path
 import uvicorn
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from itsdangerous import BadSignature, URLSafeSerializer
 
 from pages import CHAT_PAGE, LOGIN_PAGE
@@ -55,6 +56,16 @@ SESSIONS_DIR = DATA_DIR / "sessions"
 SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
 
 _SER = URLSafeSerializer(uuid.uuid4().hex, salt="aiops-web")  # restart = logout all
+
+APP.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
+
+
+@APP.get("/favicon.ico", include_in_schema=False)
+async def favicon_ico():
+    from fastapi.responses import FileResponse
+    return FileResponse(Path(__file__).parent / "static" / "favicon-32.png",
+                        media_type="image/png")
+
 
 try:
     from importlib.metadata import version as _pkgver

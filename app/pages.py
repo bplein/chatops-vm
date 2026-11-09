@@ -78,6 +78,8 @@ LOGIN_PAGE = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ChatOps VM — Sign in</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <style>{_BASE_CSS}
 main{{flex:1;display:grid;place-items:center;width:100%}}
 .card{{width:min(380px,100%);background:var(--surface);border:1px solid var(--line);
@@ -121,6 +123,8 @@ CHAT_PAGE = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ChatOps VM</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <style>{_BASE_CSS}
 #w{{max-width:64ch;margin:0 auto;padding:8px 16px 140px}}
 header{{display:flex;align-items:baseline;gap:10px;padding:6px 2px 12px;border-bottom:1px solid var(--line);margin-bottom:18px}}

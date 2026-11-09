@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 
 DEFAULT_NAMESPACE = "chatops-vm"
 # Pinned tag — keep in sync with VERSION; never :latest.
-DEFAULT_AGENT_IMAGE = "ghcr.io/bplein/chatops-vm:0.3.6"
+DEFAULT_AGENT_IMAGE = "ghcr.io/bplein/chatops-vm:0.3.7"
 DEFAULT_MAX_SESSION_PODS = 10
 
 # Annotation stamped by the web layer on every chat message. The periodic
