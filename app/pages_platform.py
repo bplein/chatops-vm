@@ -101,6 +101,11 @@ section code{{font:500 .875rem/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
 section pre{{background:var(--field);border:1px solid var(--line);border-radius:9px;
   padding:10px 12px;overflow-x:auto}}
 section pre code{{border:0;background:none;padding:0}}
+section label{{display:block;font-size:.75rem;color:var(--muted);margin:16px 0 6px}}
+section input[type=password],section input[type=text]{{width:100%;padding:11px 13px;
+  font-size:.9375rem}}
+section input[type=password]{{letter-spacing:.02em}}
+section button{{margin-top:14px;padding:10px 16px}}
 .cancel{{display:inline-block;margin-top:22px;font-size:.8125rem}}</style></head>
 <body>
 <div id="frame">
